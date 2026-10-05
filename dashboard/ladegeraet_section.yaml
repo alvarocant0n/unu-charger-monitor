@@ -1,0 +1,93 @@
+# Abschnitt für ein Sections-Dashboard.
+# Einfügen: Dashboard bearbeiten -> Abschnitt hinzufügen -> ⋮ -> "In YAML bearbeiten"
+# Benötigt: Mushroom (HACS) für Chips und die Akku-Karte.
+type: grid
+cards:
+  - type: heading
+    heading: Ladegerät
+    heading_style: title
+    icon: mdi:power-plug-battery
+
+  - type: custom:mushroom-chips-card
+    alignment: center
+    chips:
+      - type: template
+        icon: mdi:clock-check-outline
+        icon_color: blue
+        content: >-
+          fertig ~{{ (now() + timedelta(minutes=states('sensor.unu_restzeit') | int(0))).strftime('%H:%M') }}
+      - type: template
+        icon: mdi:flash
+        icon_color: amber
+        content: "{{ states('sensor.unu_charger_power') | float(0) | round(0) | int }} W"
+      - type: template
+        icon: mdi:battery-plus-variant
+        icon_color: green
+        content: "{{ states('sensor.unu_geladen') | int(0) }} Wh"
+    visibility:
+      - condition: state
+        entity: input_boolean.unu_laedt
+        state: "on"
+    grid_options:
+      columns: full
+
+  - type: custom:mushroom-template-card
+    entity: sensor.unu_ladestand
+    primary: "Ladender Akku · {{ states(entity) | int(0) }} %"
+    secondary: "{{ 'Lädt' if is_state('input_boolean.unu_laedt', 'on') else 'Nicht am Laden' }}"
+    icon: >-
+      {%- set lvl = ((states(entity) | int(0) / 10) | round(0, 'floor') * 10) | int -%}
+      {%- if is_state('input_boolean.unu_laedt', 'on') -%}
+      {{ 'mdi:battery-charging-outline' if lvl == 0 else 'mdi:battery-charging-' ~ lvl }}
+      {%- elif lvl >= 100 -%}mdi:battery
+      {%- elif lvl == 0 -%}mdi:battery-outline
+      {%- else -%}mdi:battery-{{ lvl }}
+      {%- endif -%}
+    color: >-
+      {%- set s = states(entity) | int(0) -%}
+      {%- if s < 20 -%}red{%- elif s < 50 -%}orange{%- elif s < 80 -%}green{%- else -%}light-green{%- endif -%}
+    badge_icon: "{{ 'mdi:flash' if is_state('input_boolean.unu_laedt', 'on') else '' }}"
+    badge_color: amber
+    tap_action:
+      action: more-info
+    grid_options:
+      columns: 6
+
+  - type: tile
+    entity: sensor.unu_charger_energy
+    name: Zähler gesamt
+    grid_options:
+      columns: 6
+
+  - type: tile
+    entity: switch.unu_charger
+    name: Steckdose
+    icon: mdi:power-plug-battery
+    vertical: false
+    grid_options:
+      columns: 6
+
+  - type: tile
+    entity: input_boolean.unu_live_activity
+    name: Live Activity
+    icon: mdi:cellphone-text
+    vertical: false
+    grid_options:
+      columns: 6
+
+  - type: history-graph
+    title: Ladekurve
+    hours_to_show: 12
+    entities:
+      - entity: sensor.unu_charger_power
+        name: Leistung
+    grid_options:
+      columns: full
+
+  - type: logbook
+    title: Ladeprotokoll
+    hours_to_show: 168
+    target:
+      entity_id: input_boolean.unu_laedt
+    grid_options:
+      columns: full
