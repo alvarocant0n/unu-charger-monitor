@@ -9,6 +9,10 @@ immer gleichen Ladekurve schätzt das Package Ladestand und Restzeit und zeigt b
 > charging display (state of charge, ETA, iOS Live Activity / Android Live Update), based on a
 > measured charging curve. Comments and notifications are in German.*
 
+<p align="center">
+  <img src="images/Live-activity.PNG" alt="Live Activity auf dem Sperrbildschirm" width="300">
+</p>
+
 ## Funktionen
 
 - **Ladestand & Restzeit** aus einer gemessenen Ladekurve des Original-Ladegeräts
