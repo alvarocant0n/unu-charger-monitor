@@ -10,7 +10,9 @@ immer gleichen Ladekurve schätzt das Package Ladestand und Restzeit und zeigt b
 > measured charging curve. Comments and notifications are in German.*
 
 <p align="center">
-  <img src="images/Live-activity.PNG" alt="Live Activity auf dem Sperrbildschirm" width="300">
+  <img src="images/Live-activity.PNG" alt="Live Activity auf dem Sperrbildschirm" width="280">
+  &nbsp;&nbsp;
+  <img src="images/Live-activity2.PNG" alt="Live Activity" width="280">
 </p>
 
 ## Funktionen
