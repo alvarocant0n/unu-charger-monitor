@@ -111,6 +111,9 @@ geht die Steckdose 15 min später aus. **Vor der nächsten Ladung die Steckdose 
 
 `dashboard/ladegeraet_section.yaml` ist ein fertiger Abschnitt für ein Sections-Dashboard:
 Dashboard bearbeiten → Abschnitt hinzufügen → ⋮ → „In YAML bearbeiten“ → Inhalt einfügen.
+   <p align="center">
+     <img src="images/HA_Dash.jpeg" alt="Dashboard-Abschnitt in Home Assistant" width="420">
+   </p>
 
 ## Kalibrierung
 
