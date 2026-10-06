@@ -1,4 +1,4 @@
-# unu Charge Monitor 🛵🔋
+# unu Charger Monitor 🛵🔋
 
 Live-Ladeanzeige für den **unu-Akku** in Home Assistant – ohne smartes Ladegerät.
 Das Original-Ladegerät hängt an einer **smarten Steckdose mit Leistungsmessung**; aus der
@@ -6,8 +6,8 @@ immer gleichen Ladekurve schätzt das Package Ladestand und Restzeit und zeigt b
 **Live Activity** (iOS) bzw. **Live Update** (Android) auf dem Sperrbildschirm.
 
 > 🇬🇧 *Home Assistant package that turns a dumb unu battery charger on a smart plug into a live
-> charging display (state of charge, ETA, iOS Live Activity / Android Live Update), based on a
-> measured charging curve. Comments and notifications are in German.*
+> charging display (state of charge, ETA, charge limit, iOS Live Activity / Android Live Update),
+> based on a measured charging curve. Comments and notifications are in German.*
 
 <p align="center">
   <img src="images/Live-activity.PNG" alt="Live Activity auf dem Sperrbildschirm" width="280">
@@ -18,10 +18,11 @@ immer gleichen Ladekurve schätzt das Package Ladestand und Restzeit und zeigt b
 ## Funktionen
 
 - **Ladestand & Restzeit** aus einer gemessenen Ladekurve des Original-Ladegeräts
-- **Startladestand wird automatisch erkannt** (4 min nach Ladebeginn aus der Ladeleistung)
+- **Startladestand wird automatisch erkannt** (aus der Ladeleistung, sobald das Ladegerät nach dem Anlauf stabil lädt)
 - **Live Activity / Live Update** mit Prozent, Fortschrittsbalken, Leistung und Fertig-Uhrzeit
-- **Push-Nachricht** bei „voll“ oder „abgebrochen“ (z. B. Akku zu früh abgezogen)
-- **Steckdose schaltet 15 min nach Ladeende ab** (spart die Erhaltungsleistung)
+- **Ladelimit** (z. B. 80 %) – Steckdose schaltet ab, sobald der Ladestand erreicht ist
+- **Push-Nachricht** bei „voll“, „Ladelimit erreicht“ oder „abgebrochen“
+- **Steckdose schaltet 15 min nach einer Vollladung ab** (spart die Erhaltungsleistung)
 - **Ladeprotokoll** unter „Aktivität“: geladene Wh, Startwert, Spitzenleistung, hochgerechnete Vollladung
 - Live Activity per Schalter ein-/ausschaltbar
 - Robust gegen Neustarts, kurze Steckdosen-Aussetzer und Neuladen der Konfiguration
@@ -31,7 +32,8 @@ immer gleichen Ladekurve schätzt das Package Ladestand und Restzeit und zeigt b
 - Home Assistant **2026.7** oder neuer
 - Smarte Steckdose mit **Leistung (W)** und **Energiezähler (kWh)**
 - Companion-App mit Live-Activity-/Live-Update-Unterstützung
-  (iOS 17.2+ mit App 2026.9+, bzw. Android 16+)
+  (iOS 17.2+ mit App 2026.9+, bzw. Android 16+; ältere Android-Versionen zeigen eine
+  normale Mitteilung mit Fortschrittsbalken)
 - Für das Dashboard (optional): [Mushroom](https://github.com/piitaya/lovelace-mushroom) über HACS
 
 ## Installation
@@ -43,11 +45,14 @@ homeassistant:
   packages: !include_dir_named packages
 ```
 
-Gibt es schon einen `homeassistant:`-Block, nur die `packages`-Zeile darunter einrücken.
+Gibt es schon einen `homeassistant:`-Block, nur die `packages`-Zeile mit zwei Leerzeichen
+darunter einrücken.
 
-**2. Datei ablegen:** `packages/unu_laden.yaml` nach `/config/packages/unu_laden.yaml` kopieren.
+**2. Datei ablegen:** `packages/unu_laden.yaml` nach `/homeassistant/packages/unu_laden.yaml`
+kopieren (z. B. mit dem File-editor- oder Studio-Code-Server-Add-on; je nach Zugriff heißt der
+Ordner auch `/config/packages/`). Den Ordner `packages` gegebenenfalls anlegen.
 
-**3. Anpassen** (im File editor mit Suchen & Ersetzen):
+**3. Anpassen** (im Editor mit Suchen & Ersetzen):
 
 | Suchen | Ersetzen durch |
 |---|---|
@@ -65,12 +70,19 @@ ersten Mal auf „aus“ – einmal einschalten, danach merkt HA sich den Zustan
 
 ## Benutzung
 
-Steckdose an, Akku anstecken – fertig. Nach ~30 s erscheint die Live Activity, nach 4 min ist
-der Startladestand geschätzt. Bei Bedarf lässt er sich unter „unu Ladestand bei Ladestart“
-von Hand korrigieren.
+Steckdose an, Akku anstecken – fertig. Nach ~30 s erscheint die Live Activity mit
+„wird berechnet …“. Das Ladegerät startet sanft und braucht ein paar Minuten bis zur vollen
+Leistung; sobald sie stabil ist (meist nach 3–6 min), wird der Startladestand geschätzt und
+Ladestand, Fertig-Uhrzeit und Fortschrittsbalken erscheinen. Bei Bedarf lässt sich der
+Startwert unter „unu Ladestand bei Ladestart“ von Hand korrigieren.
 
-Am Ende verschwindet die Live Activity, eine Push-Nachricht kommt, und 15 min später geht die
-Steckdose aus. **Vor der nächsten Ladung die Steckdose wieder einschalten.**
+**Ladelimit:** Unter „unu Ladelimit“ einen Wert wählen (100 % = kein Limit). Das Limit greift,
+sobald der Startladestand ermittelt ist; danach schaltet die Steckdose ab, sobald der geschätzte
+Ladestand erreicht ist (Genauigkeit etwa ±5–8 %). Ab und zu auf 100 % laden, damit das BMS
+die Zellen am oberen Ende ausgleichen kann.
+
+**Ende:** Die Live Activity verschwindet, eine Push-Nachricht kommt, und bei einer Vollladung
+geht die Steckdose 15 min später aus. **Vor der nächsten Ladung die Steckdose wieder einschalten.**
 
 ## Dashboard
 
@@ -96,12 +108,14 @@ trägst du deinen Wert im Package im Abschnitt **„Kalibrierung“** (unter `te
 
 Für **andere Ladegeräte oder Akkus** müssen auch die Tabellen neu gemessen werden: eine
 Ladung möglichst ab leerem Akku durchlaufen lassen, unter „Verlauf“ den Leistungs- und
-Energiesensor als CSV exportieren und die Tabellen daraus ableiten.
+Energiesensor als CSV exportieren und die Tabellen daraus ableiten. Messdaten von anderen
+Ladegeräten sind als Issue oder Pull Request sehr willkommen!
 
 ## Fehlerbehebung
 
 **Nur normale Mitteilungen statt Live Activity:** App-, HA- und iOS-Version prüfen;
 in den iOS-Einstellungen → Home Assistant → Live-Aktivitäten erlauben; App einmal neu öffnen.
+Auf Android: Benachrichtigungen für die HA-App erlauben und die Akku-Optimierung abschalten.
 
 **Ende wird nicht erkannt:** Zieht dein Ladegerät nach dem Vollladen mehr als 12 W, die
 Schwelle `below: 12` beim Trigger `id: ende` erhöhen.

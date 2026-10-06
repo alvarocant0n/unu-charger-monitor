@@ -1,4 +1,4 @@
-# Abschnitt für ein Sections-Dashboard.
+# Abschnitt "Ladegerät" für ein Sections-Dashboard.
 # Einfügen: Dashboard bearbeiten -> Abschnitt hinzufügen -> ⋮ -> "In YAML bearbeiten"
 # Benötigt: Mushroom (HACS) für Chips und die Akku-Karte.
 type: grid
@@ -8,6 +8,7 @@ cards:
     heading_style: title
     icon: mdi:power-plug-battery
 
+  # ---------- Chips: Fertig-Uhrzeit, Leistung, geladen (nur beim Laden) ----------
   - type: custom:mushroom-chips-card
     alignment: center
     chips:
@@ -15,7 +16,11 @@ cards:
         icon: mdi:clock-check-outline
         icon_color: blue
         content: >-
+          {%- if has_value('sensor.unu_restzeit') -%}
           fertig ~{{ (now() + timedelta(minutes=states('sensor.unu_restzeit') | int(0))).strftime('%H:%M') }}
+          {%- else -%}
+          wird berechnet …
+          {%- endif -%}
       - type: template
         icon: mdi:flash
         icon_color: amber
@@ -31,10 +36,18 @@ cards:
     grid_options:
       columns: full
 
+  # ---------- Akku & Ladelimit ----------
   - type: custom:mushroom-template-card
     entity: sensor.unu_ladestand
-    primary: "Ladender Akku · {{ states(entity) | int(0) }} %"
-    secondary: "{{ 'Lädt' if is_state('input_boolean.unu_laedt', 'on') else 'Nicht am Laden' }}"
+    primary: >-
+      {{ (states(entity) | int(0) ~ ' %') if has_value(entity) else 'wird ermittelt …' }}
+    secondary: >-
+      {%- set limit = states('input_select.unu_ladelimit') | replace(' %', '') | int(100) -%}
+      {%- if is_state('input_boolean.unu_laedt', 'on') -%}
+      Lädt{{ ' bis ' ~ limit ~ ' %' if limit < 100 else '' }}
+      {%- else -%}
+      Akku · nicht am Laden
+      {%- endif -%}
     icon: >-
       {%- set lvl = ((states(entity) | int(0) / 10) | round(0, 'floor') * 10) | int -%}
       {%- if is_state('input_boolean.unu_laedt', 'on') -%}
@@ -54,11 +67,14 @@ cards:
       columns: 6
 
   - type: tile
-    entity: sensor.unu_charger_energy
-    name: Zähler gesamt
+    entity: input_select.unu_ladelimit
+    name: Ladelimit
+    icon: mdi:battery-lock
+    vertical: false
     grid_options:
       columns: 6
 
+  # ---------- Steckdose & Live Activity ----------
   - type: tile
     entity: switch.unu_charger
     name: Steckdose
@@ -75,6 +91,7 @@ cards:
     grid_options:
       columns: 6
 
+  # ---------- Ladekurve ----------
   - type: history-graph
     title: Ladekurve
     hours_to_show: 12
@@ -84,6 +101,7 @@ cards:
     grid_options:
       columns: full
 
+  # ---------- Ladeprotokoll ----------
   - type: logbook
     title: Ladeprotokoll
     hours_to_show: 168

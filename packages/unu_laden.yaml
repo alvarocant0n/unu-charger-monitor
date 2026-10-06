@@ -1,9 +1,12 @@
 # =====================================================================
-#  unu Charge Monitor – Home Assistant Package
+#  unu Charger Monitor – Home Assistant Package
+#  https://github.com/alvarocant0n/unu-charger-monitor
+#
 #  Live-Ladeanzeige für den unu-Akku (Scooter Pro, 1778 Wh) mit dem
 #  Original-Ladegerät an einer smarten Steckdose mit Leistungsmessung.
 #
-#  Ablage: /config/packages/unu_laden.yaml
+#  Ablage: /homeassistant/packages/unu_laden.yaml
+#          (heißt je nach Zugriff auch /config/packages/unu_laden.yaml)
 #  Anleitung: siehe README.md
 #
 #  VOR DEM EINSATZ ANPASSEN (Suchen & Ersetzen):
@@ -23,7 +26,8 @@ input_number:
   # --- intern ---
   unu_start_soc:
     name: unu Ladestand bei Ladestart
-    min: 0
+    # -1 = wird noch ermittelt (wird bei jedem Ladestart gesetzt)
+    min: -1
     max: 100
     step: 1
     unit_of_measurement: "%"
@@ -41,6 +45,23 @@ input_number:
     step: 0.1
     unit_of_measurement: W
     mode: box
+
+input_select:
+  # Ladelimit: Steckdose schaltet ab, sobald der geschätzte Ladestand erreicht ist.
+  # "100 %" = kein Limit (normale Vollladung). Erste Option = Standard.
+  unu_ladelimit:
+    name: unu Ladelimit
+    icon: mdi:battery-lock
+    options:
+      - "100 %"
+      - "95 %"
+      - "90 %"
+      - "85 %"
+      - "80 %"
+      - "75 %"
+      - "70 %"
+      - "60 %"
+      - "50 %"
 
 input_boolean:
   unu_laedt:
@@ -111,6 +132,11 @@ template:
         unique_id: unu_ladestand_geschaetzt
         unit_of_measurement: "%"
         device_class: battery
+        # Während der Startladestand ermittelt wird: "nicht verfügbar" statt falscher Werte
+        availability: >
+          {{ is_state('input_boolean.unu_laedt', 'off')
+             or is_state('binary_sensor.unu_abfallphase', 'on')
+             or states('input_number.unu_start_soc') | float(-1) >= 0 }}
         state: >
           {% if is_state('input_boolean.unu_laedt', 'off') or not has_value('sensor.unu_charger_power') %}
             {# nicht am Laden oder Steckdose ohne Wert -> letzten Wert behalten #}
@@ -150,6 +176,8 @@ template:
         unique_id: unu_restzeit
         unit_of_measurement: min
         device_class: duration
+        availability: >
+          {{ is_state('input_boolean.unu_laedt', 'off') or has_value('sensor.unu_ladestand') }}
         state: >
           {% if is_state('input_boolean.unu_laedt', 'off') %}
             0
@@ -184,6 +212,26 @@ template:
               {% set soc = states('sensor.unu_ladestand') | float(0) %}
               {% set m = ([91 - soc, 0] | max) / 100 * wh_voll / ([p, 1] | max) * 60 + cv_min %}
             {% endif %}
+            {# Mit Ladelimit: Zeit abziehen, die vom Limit bis 100 % noch nötig wäre #}
+            {% set limit = states('input_select.unu_ladelimit') | replace(' %', '') | int(100) %}
+            {% if limit < 100 %}
+              {% if limit <= 91 %}
+                {% set rl = (91 - limit) / 100 * wh_voll / ([p, 1] | max) * 60 + cv_min %}
+              {% else %}
+                {# Ladestand -> Restminuten in der Abfallphase (aus Messung) #}
+                {% set tab = [[91,71],[92,66],[93,61],[94.3,56],[95.3,50],[96.2,45],
+                              [97,40],[97.8,33],[98.5,26],[99.1,18],[99.7,7],[100,0]] %}
+                {% set ns2 = namespace(rl=0) %}
+                {% for i in range(tab | length - 1) %}
+                  {% set a = tab[i] %}{% set b = tab[i + 1] %}
+                  {% if limit >= a[0] and limit <= b[0] %}
+                    {% set ns2.rl = a[1] + (limit - a[0]) / (b[0] - a[0]) * (b[1] - a[1]) %}
+                  {% endif %}
+                {% endfor %}
+                {% set rl = ns2.rl %}
+              {% endif %}
+              {% set m = m - rl %}
+            {% endif %}
             {{ ([m, 0] | max) | round(0) }}
           {% endif %}
 
@@ -213,6 +261,8 @@ logbook:
     entities:
       - automation.unu_live_activity_aktualisieren
       - automation.unu_hochstleistung_merken
+      - automation.unu_ladelimit
+      - automation.unu_startladestand_schatzen
 
 automation:
   # ======================= Hauptautomation =======================
@@ -227,11 +277,6 @@ automation:
         above: 20
         for: "00:00:30"
         id: start
-      - trigger: numeric_state
-        entity_id: sensor.unu_charger_power
-        above: 20
-        for: "00:04:00"
-        id: soc_auto
       - trigger: state
         entity_id: input_boolean.unu_live_activity
         to: "off"
@@ -263,51 +308,14 @@ automation:
                   entity_id: input_number.unu_p_max
                 data:
                   value: 0
-              - action: input_boolean.turn_on
-                target:
-                  entity_id: input_boolean.unu_laedt
-
-          # ---------- Startladestand automatisch aus der Leistung bestimmen ----------
-          # Tabelle aus der Messung: [Leistung / Spitzenleistung, Ladestand %]
-          # (Werte unter 38 % aus dem Verlauf hochgerechnet)
-          - conditions:
-              - condition: trigger
-                id: soc_auto
-              - condition: state
-                entity_id: input_boolean.unu_laedt
-                state: "on"
-              - condition: template   # nur wenn die Leistung noch steigt (= nicht schon fast voll)
-                value_template: >
-                  {{ states('sensor.unu_charger_power') | float(0)
-                     >= 0.97 * states('input_number.unu_p_max') | float(0) }}
-            sequence:
               - action: input_number.set_value
                 target:
                   entity_id: input_number.unu_start_soc
                 data:
-                  value: >
-                    {% set r = states('sensor.unu_charger_power') | float(0)
-                               / states('sensor.unu_kalibrierung_spitzenleistung') | float(303) %}
-                    {% set kurve = [[0.81,0],[0.85,20],[0.888,38],[0.901,45],[0.917,53],[0.934,58],
-                                    [0.95,68],[0.961,73],[0.976,78],[0.984,84],[1.0,90]] %}
-                    {% if r <= kurve[0][0] %}
-                      {% set soc = 0 %}
-                    {% elif r >= kurve[-1][0] %}
-                      {% set soc = 90 %}
-                    {% else %}
-                      {% set ns = namespace(soc=0) %}
-                      {% for i in range(kurve | length - 1) %}
-                        {% set a = kurve[i] %}{% set b = kurve[i + 1] %}
-                        {% if r >= a[0] and r <= b[0] %}
-                          {% set ns.soc = a[1] + (r - a[0]) / (b[0] - a[0]) * (b[1] - a[1]) %}
-                        {% endif %}
-                      {% endfor %}
-                      {% set soc = ns.soc %}
-                    {% endif %}
-                    {# Energie der ersten 4 Minuten abziehen -> Ladestand beim Einstecken #}
-                    {% set korr = states('sensor.unu_geladen') | float(0)
-                                  / states('sensor.unu_kalibrierung_energie_vollladung') | float(1875) * 100 %}
-                    {{ ([soc - korr, 0] | max) | round(0) }}
+                  value: -1
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.unu_laedt
 
           # ---------- Ladeende ----------
           - conditions:
@@ -322,10 +330,12 @@ automation:
                   voll: >
                     {{ is_state('binary_sensor.unu_abfallphase', 'on') and
                        now() - states.binary_sensor.unu_abfallphase.last_changed > timedelta(minutes=10) }}
-                  start: "{{ states('input_number.unu_start_soc') | float(0) }}"
+                  start: "{{ states('input_number.unu_start_soc') | float(-1) }}"
                   soc_abbruch: >
-                    {{ ([start + wh / (states('sensor.unu_kalibrierung_energie_vollladung') | float(1875)) * 100, 99]
-                        | min) | round(0) | int }}
+                    {% if start >= 0 %}
+                      {{ ([start + wh / (states('sensor.unu_kalibrierung_energie_vollladung') | float(1875)) * 100, 99]
+                          | min) | round(0) | int }}
+                    {% else %}-1{% endif %}
               - action: input_boolean.turn_off
                 target:
                   entity_id: input_boolean.unu_laedt
@@ -336,8 +346,8 @@ automation:
                   entity_id: input_boolean.unu_laedt
                   message: >-
                     {{ 'Ladung beendet' if voll else 'Ladung abgebrochen' }}: {{ wh }} Wh,
-                    Start {{ start | int }} %, Spitze {{ states('input_number.unu_p_max') }} W
-                    {%- if voll and start < 90 %}, hochgerechnet Vollladung {{ (wh / (100 - start) * 100) | round(0) }} Wh{% endif %}
+                    Start {{ (start | int ~ ' %') if start >= 0 else 'unbekannt' }}, Spitze {{ states('input_number.unu_p_max') }} W
+                    {%- if voll and 0 <= start < 90 %}, hochgerechnet Vollladung {{ (wh / (100 - start) * 100) | round(0) }} Wh{% endif %}
               # Live Activity beenden ...
               - action: notify.mobile_app_DEIN_HANDY
                 data:
@@ -349,7 +359,7 @@ automation:
                 data:
                   title: UNU Charger
                   message: >-
-                    {% if voll %}Akku voll geladen · {{ wh }} Wh{% else %}Laden abgebrochen bei ~{{ soc_abbruch }} % · {{ wh }} Wh{% endif %}
+                    {% if voll %}Akku voll geladen · {{ wh }} Wh{% elif soc_abbruch >= 0 %}Laden abgebrochen bei ~{{ soc_abbruch }} % · {{ wh }} Wh{% else %}Laden abgebrochen · {{ wh }} Wh{% endif %}
                   data:
                     tag: unu-laden-fertig
               # Nach erfolgreicher Vollladung die Steckdose verzögert abschalten
@@ -373,13 +383,135 @@ automation:
                   data:
                     tag: unu-laden
 
+  # ======================= Startladestand schätzen =======================
+  # Das Ladegerät startet sanft (~36 W) und braucht einige Minuten bis zur vollen
+  # Leistung. Geschätzt wird erst, wenn die Leistung stabil ist (Mittel der letzten
+  # 3 min ≈ aktueller Wert) und mind. 15 Wh geladen sind. Ein von Hand eingetragener
+  # Startwert wird nicht überschrieben.
+  - id: unu_startladestand
+    alias: unu Startladestand schätzen
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id: sensor.unu_ladeleistung
+      - trigger: time_pattern
+        minutes: "/1"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.unu_laedt
+        state: "on"
+      - condition: numeric_state     # noch nicht ermittelt
+        entity_id: input_number.unu_start_soc
+        below: 0
+      - condition: template          # nicht schon in der Abfallphase (fast voll)
+        value_template: "{{ is_state('binary_sensor.unu_abfallphase', 'off') }}"
+      # Anlauf vorbei: genug geladen und Leistung stabil.
+      # Liefert die Glättung gerade keinen Wert (Steckdose meldet konstant denselben
+      # Wert), gilt die Leistung als stabil. Spätestens ab 75 Wh (~15 min) wird
+      # in jedem Fall geschätzt.
+      - condition: template
+        value_template: >
+          {% set p = states('sensor.unu_charger_power') | float(0) %}
+          {% set avg = states('sensor.unu_ladeleistung') | float(p) %}
+          {% set wh = states('sensor.unu_geladen') | float(0) %}
+          {{ p > 100 and (
+               (wh >= 15 and (p - avg) | abs <= 0.03 * p)
+               or wh >= 75 ) }}
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.unu_start_soc
+        data:
+          value: >
+                    {% set r = states('sensor.unu_ladeleistung') | float(states('sensor.unu_charger_power') | float(0))
+                               / states('sensor.unu_kalibrierung_spitzenleistung') | float(303) %}
+                    {% set kurve = [[0.81,0],[0.85,20],[0.888,38],[0.901,45],[0.917,53],[0.934,58],
+                                    [0.95,68],[0.961,73],[0.976,78],[0.984,84],[1.0,90]] %}
+                    {% if r <= kurve[0][0] %}
+                      {% set soc = 0 %}
+                    {% elif r >= kurve[-1][0] %}
+                      {% set soc = 90 %}
+                    {% else %}
+                      {% set ns = namespace(soc=0) %}
+                      {% for i in range(kurve | length - 1) %}
+                        {% set a = kurve[i] %}{% set b = kurve[i + 1] %}
+                        {% if r >= a[0] and r <= b[0] %}
+                          {% set ns.soc = a[1] + (r - a[0]) / (b[0] - a[0]) * (b[1] - a[1]) %}
+                        {% endif %}
+                      {% endfor %}
+                      {% set soc = ns.soc %}
+                    {% endif %}
+                    {# Energie der ersten 4 Minuten abziehen -> Ladestand beim Einstecken #}
+                    {% set korr = states('sensor.unu_geladen') | float(0)
+                                  / states('sensor.unu_kalibrierung_energie_vollladung') | float(1875) * 100 %}
+                    {{ ([soc - korr, 0] | max) | round(0) }}
+
+  # ======================= Ladelimit =======================
+  # Schaltet die Steckdose ab, sobald der geschätzte Ladestand das Limit erreicht.
+  # Erst aktiv, wenn mind. 25 Wh geladen sind (~5 min), damit der Startladestand
+  # bereits geschätzt ist. Das gilt auch direkt nach einem HA-Neustart.
+  # Zusätzlich jede Minute prüfen, falls der Ladestand ohne Änderung schon am Limit steht.
+  - id: unu_ladelimit
+    alias: unu Ladelimit
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id: sensor.unu_ladestand
+      - trigger: state
+        entity_id: input_select.unu_ladelimit
+      - trigger: time_pattern
+        minutes: "/1"
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: state
+        entity_id: input_boolean.unu_laedt
+        state: "on"
+      - condition: template   # Startladestand ist geschätzt (nach ~4 min / ~20 Wh)
+        value_template: "{{ states('sensor.unu_geladen') | float(0) >= 25 }}"
+      - condition: template
+        value_template: >
+          {% set limit = states('input_select.unu_ladelimit') | replace(' %', '') | int(100) %}
+          {{ limit < 100 and states('sensor.unu_ladestand') | int(0) >= limit }}
+    variables:
+      limit: "{{ states('input_select.unu_ladelimit') | replace(' %', '') | int(100) }}"
+      wh: "{{ states('sensor.unu_geladen') | int(0) }}"
+      start: "{{ states('input_number.unu_start_soc') | int(0) }}"
+    actions:
+      # Zuerst "lädt" beenden, damit die normale Ende-Erkennung nicht zusätzlich auslöst
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.unu_laedt
+      - action: switch.turn_off
+        target:
+          entity_id: switch.unu_charger
+      - action: logbook.log
+        data:
+          name: UNU Charger
+          entity_id: input_boolean.unu_laedt
+          message: >-
+            Ladelimit {{ limit }} % erreicht: {{ wh }} Wh, Start {{ start }} %,
+            Spitze {{ states('input_number.unu_p_max') }} W
+      - action: notify.mobile_app_DEIN_HANDY
+        data:
+          message: clear_notification
+          data:
+            tag: unu-laden
+      - action: notify.mobile_app_DEIN_HANDY
+        data:
+          title: UNU Charger
+          message: "Ladelimit {{ limit }} % erreicht · {{ wh }} Wh"
+          data:
+            tag: unu-laden-fertig
+
   # ============ Live Activity aktualisieren (eigene Automation) ============
   # Bedingungen auf Automationsebene: läuft nur, wenn geladen wird und die
   # Live Activity eingeschaltet ist -> keine Einträge, wenn nichts passiert.
   - id: unu_live_activity_update
     alias: unu Live Activity aktualisieren
-    mode: single
-    max_exceeded: silent
+    mode: restart        # neuester Auslöser gewinnt, nichts wird verworfen
     triggers:
       - trigger: time_pattern
         minutes: "/5"   # iOS drosselt häufigere Updates
@@ -389,6 +521,15 @@ automation:
       - trigger: state
         entity_id: input_boolean.unu_live_activity
         to: "on"
+      - trigger: state                     # Ladelimit geändert -> neue Fertig-Zeit sofort zeigen
+        entity_id: input_select.unu_ladelimit
+      - trigger: state                     # Startladestand ermittelt -> sofort echte Werte zeigen
+        entity_id: input_number.unu_start_soc
+      - trigger: state                     # Ladestand/Restzeit wieder verfügbar -> sofort zeigen
+        entity_id:
+          - sensor.unu_ladestand
+          - sensor.unu_restzeit
+        from: unavailable
       - trigger: event
         event_type: automation_reloaded
     conditions:
@@ -400,27 +541,34 @@ automation:
         state: "on"
       - condition: template   # keine Werte senden, solange die Steckdose keinen Wert liefert
         value_template: "{{ has_value('sensor.unu_charger_power') }}"
-    variables:
-      soc: "{{ states('sensor.unu_ladestand') | int(0) }}"
-      rest: "{{ states('sensor.unu_restzeit') | int(0) }}"
-      watt: >
-        {{ states('sensor.unu_ladeleistung') | float(states('sensor.unu_charger_power') | float(0))
-           | round(0) | int }}
-      farbe: >
-        {% if soc < 20 %}#F44336{% elif soc < 50 %}#FF9800{% elif soc < 80 %}#4CAF50{% else %}#8BC34A{% endif %}
     actions:
+      # Kurz warten, damit z. B. nach einer Limit-Änderung die Restzeit schon neu berechnet ist
+      - delay:
+          seconds: 3
+      - variables:
+          bereit: "{{ has_value('sensor.unu_ladestand') and has_value('sensor.unu_restzeit') }}"
+          soc: "{{ states('sensor.unu_ladestand') | int(0) }}"
+          rest: "{{ states('sensor.unu_restzeit') | int(0) }}"
+          limit: "{{ states('input_select.unu_ladelimit') | replace(' %', '') | int(100) }}"
+          watt: "{{ states('sensor.unu_charger_power') | float(0) | round(0) | int }}"
+          farbe: >
+            {% if soc < 20 %}#F44336{% elif soc < 50 %}#FF9800{% elif soc < 80 %}#4CAF50{% else %}#8BC34A{% endif %}
       - action: notify.mobile_app_DEIN_HANDY
         data:
           title: UNU Charger
           message: >-
-            {{ watt }} W ~{{ (now() + timedelta(minutes=rest)).strftime('%H:%M') }}
+            {%- if bereit -%}
+            {{ watt }} W ~{{ (now() + timedelta(minutes=rest)).strftime('%H:%M') }}{{ '  Limit: ' ~ limit ~ ' %' if limit < 100 else '' }}
+            {%- else -%}
+            {{ watt }} W  wird berechnet …
+            {%- endif -%}
           data:
             tag: unu-laden
             live_update: true
             silent: true
             alert_once: true
-            critical_text: "{{ soc }} %"
-            progress: "{{ soc }}"
+            critical_text: "{{ (soc ~ ' %') if bereit else '…' }}"
+            progress: "{{ soc if bereit else 0 }}"
             progress_max: 100
             notification_icon: mdi:moped-electric-outline
             notification_icon_color: "{{ farbe }}"
