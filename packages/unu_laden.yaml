@@ -71,19 +71,32 @@ input_boolean:
     name: unu Live Activity
     icon: mdi:cellphone-text
 
-sensor:
-  # Zeitgewichteter Mittelwert der letzten 3 Minuten (kurze Aussetzer fallen kaum ins Gewicht)
-  - platform: statistics
-    name: unu Ladeleistung
-    unique_id: unu_ladeleistung_mean
-    entity_id: sensor.unu_charger_power
-    state_characteristic: average_step
-    max_age:
-      minutes: 3
-    sampling_size: 300
-    keep_last_sample: true
-
 template:
+  # ---------- Geglättete Ladeleistung ----------
+  # Gleitender Mittelwert, alle 15 s aktualisiert. Behält seinen Wert über Neustarts,
+  # wird nie "nicht verfügbar" und braucht keine zusätzliche Integration.
+  # Beim Ein-/Ausschalten (unter 20 W) springt er direkt auf den aktuellen Wert.
+  - triggers:
+      - trigger: time_pattern
+        seconds: "/15"
+    sensor:
+      - name: unu Ladeleistung geglättet
+        unique_id: unu_ladeleistung_ema
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:flash
+        state: >
+          {% set p = states('sensor.unu_charger_power') | float(-1) %}
+          {% set alt = this.state | float(-1) if this is defined else -1 %}
+          {% if p < 0 %}
+            {{ [alt, 0] | max }}
+          {% elif alt < 20 or p < 20 %}
+            {{ p }}
+          {% else %}
+            {{ (alt * 0.75 + p * 0.25) | round(1) }}
+          {% endif %}
+
   - binary_sensor:
       - name: unu Abfallphase
         unique_id: unu_abfallphase
@@ -93,7 +106,7 @@ template:
             {{ this.state == 'on' }}
           {% else %}
             {% set p_peak = states('sensor.unu_kalibrierung_spitzenleistung') | float(303) %}
-            {% set p = states('sensor.unu_ladeleistung') | float(states('sensor.unu_charger_power') | float(0)) %}
+            {% set p = states('sensor.unu_ladeleistung_geglattet') | float(states('sensor.unu_charger_power') | float(0)) %}
             {% set p_max = states('input_number.unu_p_max') | float(0) %}
             {% set seit = now() - states.input_boolean.unu_laedt.last_changed %}
             {{ is_state('input_boolean.unu_laedt', 'on') and (
@@ -143,7 +156,7 @@ template:
             {{ this.state if this.state not in ['unknown', 'unavailable'] else 0 }}
           {% else %}
             {% set wh_voll = states('sensor.unu_kalibrierung_energie_vollladung') | float(1875) %}
-            {% set p = states('sensor.unu_ladeleistung') | float(states('sensor.unu_charger_power') | float(0)) %}
+            {% set p = states('sensor.unu_ladeleistung_geglattet') | float(states('sensor.unu_charger_power') | float(0)) %}
             {% set p_max = [states('input_number.unu_p_max') | float(0), 1] | max %}
             {# Abfallphase aus Messung: [Leistung / Höchstleistung, Ladestand %] #}
             {% set cv = [[0.99,91],[0.91,92],[0.83,93],[0.74,94.3],[0.66,95.3],[0.58,96.2],
@@ -186,7 +199,7 @@ template:
           {% else %}
             {% set wh_voll = states('sensor.unu_kalibrierung_energie_vollladung') | float(1875) %}
             {% set cv_min = states('sensor.unu_kalibrierung_dauer_abfallphase') | float(71) %}
-            {% set p = states('sensor.unu_ladeleistung') | float(states('sensor.unu_charger_power') | float(0)) %}
+            {% set p = states('sensor.unu_ladeleistung_geglattet') | float(states('sensor.unu_charger_power') | float(0)) %}
             {% set p_max = [states('input_number.unu_p_max') | float(0), 1] | max %}
             {# Abfallphase aus Messung: [Leistung / Höchstleistung, Restminuten] #}
             {% set cv = [[0.99,71],[0.91,66],[0.83,61],[0.74,56],[0.66,50],[0.58,45],
@@ -277,6 +290,9 @@ automation:
         above: 20
         for: "00:00:30"
         id: start
+      - trigger: homeassistant          # HA lief beim Ladestart nicht -> nachholen
+        event: start
+        id: start
       - trigger: state
         entity_id: input_boolean.unu_live_activity
         to: "off"
@@ -285,6 +301,9 @@ automation:
         entity_id: sensor.unu_charger_power
         below: 12       # Abschalten bei ~35 W, danach 4 W Erhaltungsleistung
         for: "00:03:00"
+        id: ende
+      - trigger: homeassistant          # HA lief beim Ladeende nicht -> nachholen
+        event: start
         id: ende
     variables:
       wh: "{{ states('sensor.unu_geladen') | int(0) }}"
@@ -297,6 +316,9 @@ automation:
               - condition: state
                 entity_id: input_boolean.unu_laedt
                 state: "off"
+              - condition: numeric_state
+                entity_id: sensor.unu_charger_power
+                above: 20
             sequence:
               - action: input_number.set_value
                 target:
@@ -324,6 +346,9 @@ automation:
               - condition: state
                 entity_id: input_boolean.unu_laedt
                 state: "on"
+              - condition: numeric_state
+                entity_id: sensor.unu_charger_power
+                below: 12
             sequence:
               # Echte Vollladung = Abfallphase lief schon länger als 10 min
               - variables:
@@ -394,7 +419,7 @@ automation:
     max_exceeded: silent
     triggers:
       - trigger: state
-        entity_id: sensor.unu_ladeleistung
+        entity_id: sensor.unu_ladeleistung_geglattet
       - trigger: time_pattern
         minutes: "/1"
     conditions:
@@ -413,7 +438,7 @@ automation:
       - condition: template
         value_template: >
           {% set p = states('sensor.unu_charger_power') | float(0) %}
-          {% set avg = states('sensor.unu_ladeleistung') | float(p) %}
+          {% set avg = states('sensor.unu_ladeleistung_geglattet') | float(p) %}
           {% set wh = states('sensor.unu_geladen') | float(0) %}
           {{ p > 100 and (
                (wh >= 15 and (p - avg) | abs <= 0.03 * p)
@@ -424,7 +449,7 @@ automation:
           entity_id: input_number.unu_start_soc
         data:
           value: >
-                    {% set r = states('sensor.unu_ladeleistung') | float(states('sensor.unu_charger_power') | float(0))
+                    {% set r = states('sensor.unu_ladeleistung_geglattet') | float(states('sensor.unu_charger_power') | float(0))
                                / states('sensor.unu_kalibrierung_spitzenleistung') | float(303) %}
                     {% set kurve = [[0.81,0],[0.85,20],[0.888,38],[0.901,45],[0.917,53],[0.934,58],
                                     [0.95,68],[0.961,73],[0.976,78],[0.984,84],[1.0,90]] %}
@@ -582,7 +607,7 @@ automation:
     triggers:
       - trigger: state
         entity_id:
-          - sensor.unu_ladeleistung
+          - sensor.unu_ladeleistung_geglattet
           - sensor.unu_charger_power
     conditions:
       - condition: state
@@ -591,8 +616,8 @@ automation:
       # Geglätteten Wert bevorzugen; Rohwert nur, wenn die Glättung gerade nichts liefert
       - condition: template
         value_template: >
-          {{ trigger.entity_id == 'sensor.unu_ladeleistung'
-             or not has_value('sensor.unu_ladeleistung') }}
+          {{ trigger.entity_id == 'sensor.unu_ladeleistung_geglattet'
+             or not has_value('sensor.unu_ladeleistung_geglattet') }}
       - condition: template
         value_template: >
           {{ trigger.to_state.state | float(0) > states('input_number.unu_p_max') | float(0) }}
