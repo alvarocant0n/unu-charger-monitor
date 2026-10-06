@@ -1,31 +1,54 @@
-# unu Charger Monitor 🛵🔋
+<h1 align="center">unu Charger Monitor 🛵🔋</h1>
 
-Live-Ladeanzeige für den **unu-Akku** in Home Assistant – ohne smartes Ladegerät.
-Das Original-Ladegerät hängt an einer **smarten Steckdose mit Leistungsmessung**; aus der
-immer gleichen Ladekurve schätzt das Package Ladestand und Restzeit und zeigt beides als
-**Live Activity** (iOS) bzw. **Live Update** (Android) auf dem Sperrbildschirm.
+<p align="center">
+  <b>Live-Ladeanzeige für den unu-Akku in Home Assistant – ohne smartes Ladegerät.</b><br>
+  Ladestand, Fertig-Uhrzeit und Ladelimit als Live Activity auf dem iPhone (bzw. Live Update auf Android).
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Home%20Assistant-2026.7%2B-41BDF5?logo=homeassistant&logoColor=white" alt="Home Assistant 2026.7+">
+  <img src="https://img.shields.io/badge/Typ-Package-2E7D32" alt="Package">
+  <img src="https://img.shields.io/badge/iOS-Live%20Activity-000000?logo=apple&logoColor=white" alt="iOS Live Activity">
+  <img src="https://img.shields.io/badge/Android-Live%20Update-3DDC84?logo=android&logoColor=white" alt="Android Live Update">
+  <img src="https://img.shields.io/github/license/alvarocant0n/unu-charger-monitor" alt="Lizenz">
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/01-berechnet.jpeg" width="150" alt="Wird berechnet"><br><sub><b>Anlauf</b><br>wird berechnet …</sub></td>
+    <td align="center"><img src="images/02-20-prozent.jpeg" width="150" alt="20 %"><br><sub><b>20 %</b><br>Leistung &amp; Fertig-Uhrzeit</sub></td>
+    <td align="center"><img src="images/03-60-prozent-limit.jpeg" width="150" alt="60 % mit Ladelimit"><br><sub><b>60 %</b><br>mit Ladelimit 80 %</sub></td>
+    <td align="center"><img src="images/05-limit-erreicht.jpeg" width="150" alt="Ladelimit erreicht"><br><sub><b>Limit erreicht*</b><br>80 %</sub></td>
+    <td align="center"><img src="images/06-voll.jpeg" width="150" alt="Voll geladen"><br><sub><b>Voll*</b><br>100 %</sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>* Darstellung des Endzustands. Im Betrieb verschwindet die Live Activity am Ende und es kommt stattdessen eine Push-Nachricht.</sub></p>
 
 > 🇬🇧 *Home Assistant package that turns a dumb unu battery charger on a smart plug into a live
 > charging display (state of charge, ETA, charge limit, iOS Live Activity / Android Live Update),
 > based on a measured charging curve. Comments and notifications are in German.*
 
-<p align="center">
-  <img src="images/Live-activity.PNG" alt="Live Activity auf dem Sperrbildschirm" width="280">
-  &nbsp;&nbsp;
-  <img src="images/Live-activity2.PNG" alt="Live Activity" width="280">
-</p>
+## So funktioniert's
+
+Das Original-Ladegerät hängt an einer **smarten Steckdose mit Leistungsmessung**. Weil ein
+Li-Ion-Akku immer gleich lädt, verrät die Leistung, wo er gerade steht:
+
+- **Konstantstrom-Phase:** Die Leistung steigt langsam mit der Akkuspannung. Daraus wird beim
+  Start der Ladestand geschätzt, danach zählt das Package die geladene Energie hoch.
+- **Abfallphase** (ab ~91 %): Die Leistung sinkt über gut eine Stunde. Hier ergibt sich der
+  Ladestand direkt aus der Leistung – die Anzeige korrigiert sich also selbst.
 
 ## Funktionen
 
-- **Ladestand & Restzeit** aus einer gemessenen Ladekurve des Original-Ladegeräts
-- **Startladestand wird automatisch erkannt** (aus der Ladeleistung, sobald das Ladegerät nach dem Anlauf stabil lädt)
-- **Live Activity / Live Update** mit Prozent, Fortschrittsbalken, Leistung und Fertig-Uhrzeit
-- **Ladelimit** (z. B. 80 %) – Steckdose schaltet ab, sobald der Ladestand erreicht ist
-- **Push-Nachricht** bei „voll“, „Ladelimit erreicht“ oder „abgebrochen“
-- **Steckdose schaltet 15 min nach einer Vollladung ab** (spart die Erhaltungsleistung)
-- **Ladeprotokoll** unter „Aktivität“: geladene Wh, Startwert, Spitzenleistung, hochgerechnete Vollladung
-- Live Activity per Schalter ein-/ausschaltbar
-- Robust gegen Neustarts, kurze Steckdosen-Aussetzer und Neuladen der Konfiguration
+- 🔋 **Ladestand & Restzeit** aus einer gemessenen Ladekurve des Original-Ladegeräts
+- 🎯 **Startladestand wird automatisch erkannt**, sobald das Ladegerät nach dem sanften Anlauf stabil lädt
+- 📱 **Live Activity / Live Update** mit Prozent, Fortschrittsbalken, Leistung und Fertig-Uhrzeit
+- ⛔ **Ladelimit** (50–100 %) – Steckdose schaltet ab, sobald der Ladestand erreicht ist
+- 🔔 **Push-Nachricht** bei „voll“, „Ladelimit erreicht“ oder „abgebrochen“
+- 🔌 **Steckdose schaltet 15 min nach einer Vollladung ab** (spart die Erhaltungsleistung)
+- 📒 **Ladeprotokoll** unter „Aktivität“: geladene Wh, Startwert, Spitzenleistung, hochgerechnete Vollladung
+- 🛡️ Robust gegen Neustarts, kurze Steckdosen-Aussetzer und Neuladen der Konfiguration
 
 ## Voraussetzungen
 
